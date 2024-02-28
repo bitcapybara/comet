@@ -1,0 +1,44 @@
+version: "3"
+
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      # - POSTGRES_USER=
+      - POSTGRES_PASSWORD=devpass
+      - POSTGRES_DB=my_project
+
+  pgbouncer:
+    image: bitnami/pgbouncer:latest
+    ports:
+      - "6432:6432"
+    volumes:
+      # pgbouncer.ini
+      # - /my_project/misc/pgbouncer/conf/:/bitnami/pgbouncer/conf/
+      # userlists.txt
+      # "postgres" "devpass"
+      - /my_project/misc/pgbouncer/auth/userlists.txt:/bitnami/userlists.txt
+    environment:
+      - POSTGRESQL_HOST=postgres
+      - POSTGRESQL_PASSWORD=devpass
+      - POSTGRESQL_DATABASE=my_project
+      - PGBOUNCER_PORT=6432
+      - PGBOUNCER_AUTH_TYPE=trust
+      - PGBOUNCER_USERLIST_FILE=/bitnami/userlists.txt
+    depends_on:
+      - postgres
+
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.5.12
+    restart: on-failure
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    environment:
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://192.168.16.200:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_ADVERTISE_CLIENT_URLS=http://192.168.16.200:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_INITIAL_CLUSTER=node1=http://192.168.16.200:2380
