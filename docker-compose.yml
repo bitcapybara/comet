@@ -8,7 +8,7 @@ services:
     environment:
       # - POSTGRES_USER=
       - POSTGRES_PASSWORD=devpass
-      - POSTGRES_DB=my_project
+      - POSTGRES_DB=cometmq
 
   pgbouncer:
     image: bitnami/pgbouncer:latest
@@ -17,13 +17,11 @@ services:
     volumes:
       # pgbouncer.ini
       # - /my_project/misc/pgbouncer/conf/:/bitnami/pgbouncer/conf/
-      # userlists.txt
-      # "postgres" "devpass"
-      - /my_project/misc/pgbouncer/auth/userlists.txt:/bitnami/userlists.txt
+      - ./pgbouncer/userlists.txt:/bitnami/userlists.txt
     environment:
       - POSTGRESQL_HOST=postgres
       - POSTGRESQL_PASSWORD=devpass
-      - POSTGRESQL_DATABASE=my_project
+      - POSTGRESQL_DATABASE=cometmq
       - PGBOUNCER_PORT=6432
       - PGBOUNCER_AUTH_TYPE=trust
       - PGBOUNCER_USERLIST_FILE=/bitnami/userlists.txt
@@ -32,11 +30,11 @@ services:
 
   etcd:
     image: gcr.io/etcd-development/etcd:v3.5.12
-    restart: on-failure
     ports:
       - "2379:2379"
       - "2380:2380"
     environment:
+      - ETCD_NAME=node1
       - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://192.168.16.200:2380
       - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
       - ETCD_ADVERTISE_CLIENT_URLS=http://192.168.16.200:2379
