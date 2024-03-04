@@ -3,3 +3,12 @@ resolver = "2"
 members = ["client", "common", "server"]
 
 [workspace.dependencies]
+snafu = "0.8.1"
+s2n-quic = "1.33.0"
+tracing = "0.1.40"
+comet-common = { version = "*", path = "./common" }
+tokio-util = "0.7.10"
+tokio = "1.36.0"
+futures = "0.3.30"
+chrono = { version = "0.4.31", default-features = false, features = ["clock"] }
+parking_lot = "0.12.1"
