@@ -1,4 +1,6 @@
-use snafu::{ResultExt, Snafu};
+use futures::TryFutureExt;
+use snafu::{IntoError, ResultExt, Snafu};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::broker::{self, Broker};
@@ -35,18 +37,15 @@ pub async fn start_server(config: ServerConfig, token: CancellationToken) -> Res
     let broker = Broker::new().context(BrokerSnafu)?;
 
     let child_token = token.child_token();
-    let _ = futures::future::join(
-        tokio::spawn(start_quic_server(
-            config.quic,
-            broker.clone(),
-            child_token.clone(),
-        )),
-        tokio::spawn(start_http_server(
-            config.http,
-            broker.clone(),
-            child_token.clone(),
-        )),
-    )
-    .await;
+    let mut join_set = JoinSet::new();
+    join_set.spawn(
+        start_quic_server(config.quic, broker.clone(), child_token.clone())
+            .map_err(|e| QuicServerSnafu.into_error(e)),
+    );
+    join_set.spawn(
+        start_http_server(config.http, broker.clone(), child_token.clone())
+            .map_err(|e| HttpServerSnafu.into_error(e)),
+    );
+    while join_set.join_next().await.is_some() {}
     Ok(())
 }
