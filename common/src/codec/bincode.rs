@@ -1,4 +1,5 @@
 use bytes::{Buf, BufMut};
+use snafu::ResultExt;
 
 use crate::protocol::PacketCodec;
 
@@ -24,5 +25,12 @@ impl Codec for Bincode {
         T: for<'a> serde::Deserialize<'a>,
     {
         bincode::deserialize_from(buf.reader())
+    }
+
+    fn size<T>(item: &T) -> Result<u64, Self::Error>
+    where
+        T: serde::Serialize,
+    {
+        bincode::serialized_size(item)
     }
 }

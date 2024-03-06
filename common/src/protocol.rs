@@ -1,6 +1,11 @@
+mod acknowledge;
 pub mod connect;
+mod consumer;
+mod control_flow;
+mod producer;
 pub mod publish;
 pub mod response;
+mod send;
 
 use std::{io, marker::PhantomData, slice::Iter};
 
@@ -10,7 +15,16 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use crate::codec::Codec;
 
-use self::{connect::Connect, response::Response};
+use self::{
+    acknowledge::Acknowledge,
+    connect::Connect,
+    consumer::{CloseConsumer, Subscribe, Unsubscribe},
+    control_flow::ControlFlow,
+    producer::{CloseProducer, CreateProducer, ProducerReceipt},
+    publish::{Publish, PublishHeader},
+    response::Response,
+    send::{Send, SendHeader},
+};
 
 #[derive(Debug, Snafu)]
 pub enum Error<T>
@@ -29,10 +43,39 @@ where
     ProtocolDecode {
         source: T::Error,
     },
+    HeaderRemainLenTooLarge,
+    HeaderRemainLenNotEnough,
+}
+
+#[derive(Debug)]
+#[repr(u8)]
+pub enum PacketType {
+    Connect = 0,
+    CreateProducer,
+    ProducerReceipt,
+    Publish,
+    CloseProducer,
+    Subscribe,
+    ControlFlow,
+    Send,
+    Acknowledge,
+    Unsubscribe,
+    CloseConsumer,
+    Response,
 }
 
 pub enum Packet {
     Connect(Connect),
+    CreateProducer(CreateProducer),
+    ProducerReceipt(ProducerReceipt),
+    Publish(Publish),
+    CloseProducer(CloseProducer),
+    Subscribe(Subscribe),
+    ControlFlow(ControlFlow),
+    Send(Send),
+    Acknowledge(Acknowledge),
+    Unsubscribe(Unsubscribe),
+    CloseConsumer(CloseConsumer),
     Response(Response),
 }
 
@@ -40,12 +83,6 @@ impl Packet {
     pub fn packet_type(&self) -> PacketType {
         todo!()
     }
-}
-
-#[derive(Debug)]
-#[repr(u8)]
-pub enum PacketType {
-    Connect = 0,
 }
 
 impl std::fmt::Display for PacketType {
@@ -68,6 +105,12 @@ impl<T> Default for PacketCodec<T> {
     }
 }
 
+macro_rules! decode {
+    ($packet: expr, $buf: expr) => {
+        $packet(T::decode($buf).context(ProtocolDecodeSnafu)?)
+    };
+}
+
 impl<T> Decoder for PacketCodec<T>
 where
     T: Codec + std::fmt::Debug,
@@ -83,16 +126,44 @@ where
         }
         let (header, header_len) = Header::read(src.iter())?;
         // header + body + other
-        let bytes = src
-            .split_to(header.remain_len + header_len) // header + body
-            .split_off(header_len) // body
+        let body = src
+            .split_to((header_len + header.remain_len) as usize) // header + body
+            .split_off(header_len as usize) // body
             .freeze();
         Ok(Some(match header.packet_type()? {
-            PacketType::Connect => {
-                Packet::Connect(T::decode::<Connect>(bytes).context(ProtocolDecodeSnafu)?)
+            PacketType::Connect => decode!(Packet::Connect, body),
+            PacketType::Publish => {
+                let header = T::decode::<PublishHeader>(body).context(ProtocolDecodeSnafu)?;
+                let payload = src.split_to(header.payload_len as usize).freeze();
+                Packet::Publish(Publish { header, payload })
             }
+            PacketType::Acknowledge => decode!(Packet::Acknowledge, body),
+            PacketType::ControlFlow => decode!(Packet::Connect, body),
+            PacketType::CreateProducer => decode!(Packet::CreateProducer, body),
+            PacketType::ProducerReceipt => decode!(Packet::ProducerReceipt, body),
+            PacketType::CloseProducer => decode!(Packet::CloseProducer, body),
+            PacketType::Send => {
+                let header = T::decode::<SendHeader>(body).context(ProtocolDecodeSnafu)?;
+                let payload = src.split_to(header.payload_len as usize).freeze();
+                Packet::Send(Send { header, payload })
+            }
+            PacketType::Response => decode!(Packet::Response, body),
+            PacketType::Subscribe => decode!(Packet::Subscribe, body),
+            PacketType::Unsubscribe => decode!(Packet::Unsubscribe, body),
+            PacketType::CloseConsumer => decode!(Packet::CloseConsumer, body),
         }))
     }
+}
+
+macro_rules! encode {
+    ($item: expr, $buf: expr) => {
+        Header::new(
+            PacketType::Acknowledge,
+            T::size(&$item).context(ProtocolEncodeSnafu)?,
+        )
+        .write($buf)?;
+        T::encode(&$item, $buf).context(ProtocolEncodeSnafu)?;
+    };
 }
 
 impl<T> Encoder<Packet> for PacketCodec<T>
@@ -104,8 +175,44 @@ where
 
     fn encode(&mut self, item: Packet, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
         match item {
-            Packet::Connect(connect) => T::encode(&connect, dst).context(ProtocolEncodeSnafu)?,
-            Packet::Response(_) => todo!(),
+            Packet::Connect(connect) => {
+                encode!(connect, dst);
+            }
+            Packet::Response(response) => {
+                encode!(response, dst);
+            }
+            Packet::Publish(publish) => {
+                encode!(publish.header, dst);
+                dst.extend(publish.payload);
+            }
+            Packet::Acknowledge(ack) => {
+                encode!(ack, dst);
+            }
+            Packet::ControlFlow(cf) => {
+                encode!(cf, dst);
+            }
+            Packet::CreateProducer(cp) => {
+                encode!(cp, dst);
+            }
+            Packet::ProducerReceipt(pr) => {
+                encode!(pr, dst);
+            }
+            Packet::CloseProducer(cp) => {
+                encode!(cp, dst);
+            }
+            Packet::Send(send) => {
+                encode!(send.header, dst);
+                dst.extend(send.payload);
+            }
+            Packet::Subscribe(subscribe) => {
+                encode!(subscribe, dst);
+            }
+            Packet::Unsubscribe(unsubscribe) => {
+                encode!(unsubscribe, dst);
+            }
+            Packet::CloseConsumer(cc) => {
+                encode!(cc, dst);
+            }
         }
         Ok(())
     }
@@ -116,30 +223,31 @@ pub struct Header {
     /// 8 bits
     type_byte: u8,
     /// mqtt remain len algorithm
-    remain_len: usize,
+    remain_len: u64,
 }
 
 impl Header {
-    fn new(packet_type: PacketType, remain_len: usize) -> Self {
+    fn new(packet_type: PacketType, remain_len: u64) -> Self {
         Self {
             type_byte: packet_type as u8,
             remain_len,
         }
     }
-    fn read<T>(mut buf: Iter<u8>) -> Result<(Self, usize), Error<T>>
+
+    fn read<T>(mut buf: Iter<u8>) -> Result<(Self, u64), Error<T>>
     where
         T: Codec,
         T::Error: std::error::Error,
     {
-        // TODO error handling
+        // buf is not empty, so we can unwrap here
         let type_byte = buf.next().unwrap().to_owned();
 
-        let mut remain_len = 0usize;
+        let mut remain_len = 0u64;
         let mut header_len = 1; // init with type_byte bit
         let mut done = false;
         let mut shift = 0;
 
-        for byte in buf.map(|b| *b as usize) {
+        for byte in buf.map(|b| *b as u64) {
             header_len += 1;
             remain_len += (byte & 0x7F) << shift;
 
@@ -150,12 +258,12 @@ impl Header {
             shift += 7;
 
             if shift > 21 {
-                unreachable!()
+                return HeaderRemainLenTooLargeSnafu.fail();
             }
         }
 
         if !done {
-            unreachable!()
+            return HeaderRemainLenNotEnoughSnafu.fail();
         }
 
         Ok((

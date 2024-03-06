@@ -1,10 +1,11 @@
 pub mod bincode;
-pub mod flexbuffers;
-pub mod json;
-mod msgpack;
 
 pub trait Codec {
     type Error;
+
+    fn size<T>(item: &T) -> Result<u64, Self::Error>
+    where
+        T: serde::Serialize;
 
     fn encode<T>(item: &T, buf: &mut bytes::BytesMut) -> Result<(), Self::Error>
     where

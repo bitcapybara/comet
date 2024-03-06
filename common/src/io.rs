@@ -26,8 +26,8 @@ pub enum Error {
 pub fn split_quic_stream(
     stream: BidirectionalStream,
 ) -> (
-    FramedRead<ReceiveStream, BincodeCodec>,
-    FramedWrite<SendStream, BincodeCodec>,
+    FramedRead<ReceiveStream, DefaultPacketCodec>,
+    FramedWrite<SendStream, DefaultPacketCodec>,
 ) {
     let (recv_quic_stream, send_quic_stream) = stream.split();
     (

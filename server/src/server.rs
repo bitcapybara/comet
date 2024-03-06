@@ -1,11 +1,16 @@
 use snafu::{ResultExt, Snafu};
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    broker::{self, Broker},
-    http::{self, start_http_server, HttpConfig},
-    quic::{self, start_quic_server, QuicConfig},
+use crate::broker::{self, Broker};
+
+use self::{
+    http::{start_http_server, HttpConfig},
+    quic::{start_quic_server, QuicConfig},
 };
+
+mod http;
+mod meta;
+mod quic;
 
 #[derive(Debug, Snafu)]
 pub enum Error {

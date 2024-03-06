@@ -7,16 +7,18 @@ use std::{
     time::Duration,
 };
 
+use comet_common::defer::defer;
 use etcd_client as etcd;
 use futures::future::Either;
 use snafu::{ResultExt, Snafu};
 use tokio::{
     select,
     sync::{mpsc, oneshot, watch},
+    task::JoinSet,
 };
 use tokio_util::sync::CancellationToken;
 
-use super::ELECTION_KEY;
+const ELECTION_KEY: &str = "/comet/distributed/leader";
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -33,34 +35,36 @@ pub enum Role {
 }
 
 pub async fn start_election(
-    connect_addr: &str,
+    connect_addr: String,
     client: etcd::ElectionClient,
-    mut lease_id_observer: watch::Receiver<i64>,
+    mut lease_observer: watch::Receiver<i64>,
     election_notifier: watch::Sender<Role>,
     token: CancellationToken,
 ) -> Result<(), Error> {
+    let _guard = defer(|| token.cancel());
     // get new lease_id
-    if lease_id_observer.changed().await.is_err() {
+    if lease_observer.changed().await.is_err() {
         return LeaseQuitBeforeElectionSnafu.fail();
     }
-    let lease_id = *lease_id_observer.borrow_and_update();
+    let lease_id = *lease_observer.borrow_and_update();
     let token = token.child_token();
     loop {
+        let mut join_set = JoinSet::new();
         let (campaign_tx, mut campaign_rx) = mpsc::channel(1);
-        let campaign_handle = tokio::spawn(campaign_loop(
+        join_set.spawn(campaign_loop(
             client.clone(),
             connect_addr.to_string(),
             lease_id,
             campaign_tx,
-            lease_id_observer.clone(),
+            lease_observer.clone(),
             token.clone(),
         ));
         let (rolecheck_tx, mut rolecheck_rx) = mpsc::channel(1);
-        let rolecheck_handle = tokio::spawn(rolecheck_loop(
+        join_set.spawn(rolecheck_loop(
             client.clone(),
             connect_addr.to_string(),
             rolecheck_tx,
-            lease_id_observer.clone(),
+            lease_observer.clone(),
             token.clone(),
         ));
         select! {
@@ -75,7 +79,7 @@ pub async fn start_election(
             }
         }
         // wait for task finished, then start new election
-        let _ = futures::future::join(campaign_handle, rolecheck_handle).await;
+        while join_set.join_next().await.is_some() {}
     }
 }
 
@@ -165,16 +169,4 @@ async fn rolecheck_loop(
             else => return
         }
     }
-}
-
-async fn campaign(
-    mut client: etcd::ElectionClient,
-    connect_addr: &str,
-    lease_id: i64,
-) -> Result<(), Error> {
-    client
-        .campaign(ELECTION_KEY, connect_addr, lease_id)
-        .await
-        .context(ElectionCampaignSnafu)?;
-    Ok(())
 }

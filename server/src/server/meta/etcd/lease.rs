@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use comet_common::defer::defer;
 use etcd_client as etcd;
 use futures::StreamExt;
 use snafu::{ResultExt, Snafu};
@@ -47,6 +48,7 @@ pub async fn start_lease(
     notifier: watch::Sender<i64>,
     token: CancellationToken,
 ) -> Result<(), Error> {
+    let _guard = defer(|| token.cancel());
     let lease_id = client.grant(5, None).await.context(GrantLeaseSnafu)?.id();
     notifier.send(lease_id).ok();
     let lease = Lease::new(lease_id);
