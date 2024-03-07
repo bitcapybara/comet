@@ -12,7 +12,7 @@ pub struct TopicMessage {
     payload: bytes::Bytes,
 }
 
-pub trait Storage {
+pub trait Storage: Clone + Send + Sync + 'static {
     type Error;
 
     async fn create_topic(&self, topic_name: &str) -> Result<(), Self::Error>;

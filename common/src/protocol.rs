@@ -1,12 +1,3 @@
-mod acknowledge;
-pub mod connect;
-mod consumer;
-mod control_flow;
-mod producer;
-pub mod publish;
-pub mod response;
-mod send;
-
 use std::{io, marker::PhantomData, slice::Iter};
 
 use bytes::BufMut;
@@ -22,9 +13,18 @@ use self::{
     control_flow::ControlFlow,
     producer::{CloseProducer, CreateProducer, ProducerReceipt},
     publish::{Publish, PublishHeader},
-    response::Response,
+    response::{Response, ReturnCode},
     send::{Send, SendHeader},
 };
+
+pub mod acknowledge;
+pub mod connect;
+pub mod consumer;
+pub mod control_flow;
+pub mod producer;
+pub mod publish;
+pub mod response;
+pub mod send;
 
 #[derive(Debug, Snafu)]
 pub enum Error<T>
@@ -62,6 +62,9 @@ pub enum PacketType {
     Unsubscribe,
     CloseConsumer,
     Response,
+    Ping,
+    Pong,
+    Disconnect,
 }
 
 pub enum Packet {
@@ -77,11 +80,22 @@ pub enum Packet {
     Unsubscribe(Unsubscribe),
     CloseConsumer(CloseConsumer),
     Response(Response),
+    Ping,
+    Pong,
+    Disconnect,
 }
 
 impl Packet {
     pub fn packet_type(&self) -> PacketType {
         todo!()
+    }
+
+    pub fn err(code: ReturnCode) -> Packet {
+        Packet::Response(Response(code))
+    }
+
+    pub fn ok() -> Packet {
+        Packet::Response(Response(ReturnCode::Success))
     }
 }
 
@@ -151,6 +165,9 @@ where
             PacketType::Subscribe => decode!(Packet::Subscribe, body),
             PacketType::Unsubscribe => decode!(Packet::Unsubscribe, body),
             PacketType::CloseConsumer => decode!(Packet::CloseConsumer, body),
+            PacketType::Ping => Packet::Ping,
+            PacketType::Pong => Packet::Pong,
+            PacketType::Disconnect => Packet::Disconnect,
         }))
     }
 }
@@ -213,6 +230,9 @@ where
             Packet::CloseConsumer(cc) => {
                 encode!(cc, dst);
             }
+            Packet::Ping => Header::new(PacketType::Ping, 0).write(dst)?,
+            Packet::Pong => Header::new(PacketType::Pong, 0).write(dst)?,
+            Packet::Disconnect => Header::new(PacketType::Disconnect, 0).write(dst)?,
         }
         Ok(())
     }

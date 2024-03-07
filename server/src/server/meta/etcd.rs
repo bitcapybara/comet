@@ -41,8 +41,8 @@ pub struct MetaConfig {
 }
 
 /// The leader's responsibility is to assign topics to brokers and postgres
-pub async fn start_meta_server(
-    broker: Broker,
+pub async fn start_meta_server<M, S>(
+    broker: Broker<M, S>,
     config: MetaConfig,
     token: CancellationToken,
 ) -> Result<(), Error> {

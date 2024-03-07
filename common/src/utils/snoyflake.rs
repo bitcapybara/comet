@@ -2,6 +2,8 @@ use chrono::prelude::*;
 use parking_lot::Mutex;
 use std::{sync::Arc, thread, time::Duration};
 
+use super::IdGenerator;
+
 /// bit length of time
 const BIT_LEN_TIME: u64 = 39;
 /// bit length of sequence number
@@ -85,4 +87,10 @@ fn current_elapsed_time(start_time: i64) -> i64 {
 fn sleep_time(overtime: i64) -> Duration {
     Duration::from_millis(overtime as u64 * 10)
         - Duration::from_micros((Utc::now().timestamp_micros() % SONYFLAKE_TIME_UNIT) as u64)
+}
+
+impl IdGenerator for Sonyflake {
+    fn next_id(&self) -> u64 {
+        self.next_id()
+    }
 }

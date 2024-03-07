@@ -88,8 +88,8 @@ async fn read_stream(
                 };
                 let (res_tx, res_rx) = oneshot::channel::<Packet>();
                 if request_tx.send(Request {packet, res_tx}).await.is_err() {
-                    error!("endpoint closed, cannot process packet any more");
-                    send_stream.send(Packet::Response(Response(ReturnCode::EndpointClosed))).await.ok();
+                    error!("shutting down, cannot process packet any more");
+                    send_stream.send(Packet::Disconnect).await.ok();
                     break;
                 }
                 // managed by FuturesOrdered

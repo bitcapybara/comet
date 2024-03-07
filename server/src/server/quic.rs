@@ -11,7 +11,10 @@ use comet_common::{defer::defer, mtls};
 use crate::{
     broker::{start_broker, Broker},
     client::start_client,
+    storage::Storage,
 };
+
+use super::meta::Meta;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -35,11 +38,15 @@ pub struct QuicConfig {
     pub listen_addr: SocketAddr,
 }
 
-pub async fn start_quic_server(
+pub async fn start_quic_server<M, S>(
     config: QuicConfig,
-    broker: Broker,
+    broker: Broker<M, S>,
     token: CancellationToken,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+    M: Meta<Storage = S>,
+    S: Storage,
+{
     let _gurad = defer(|| token.cancel());
     let tls = tls::Server::builder()
         .with_trusted_certificate(config.certs.ca_cert_file.as_path())
@@ -74,7 +81,14 @@ pub async fn start_quic_server(
     Ok(())
 }
 
-async fn accept_loop(mut server: s2n_quic::Server, broker: Broker, token: CancellationToken) {
+async fn accept_loop<M, S>(
+    mut server: s2n_quic::Server,
+    broker: Broker<M, S>,
+    token: CancellationToken,
+) where
+    M: Meta<Storage = S>,
+    S: Storage,
+{
     let mut futs = JoinSet::new();
     let mut latest_client_id: u64 = 0;
 

@@ -5,7 +5,9 @@ use comet_common::defer::defer;
 use snafu::{ResultExt, Snafu};
 use tokio_util::sync::CancellationToken;
 
-use crate::broker::Broker;
+use crate::{broker::Broker, storage::Storage};
+
+use super::meta::Meta;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -17,11 +19,15 @@ pub struct HttpConfig {
     listen_addr: SocketAddr,
 }
 
-pub async fn start_http_server(
+pub async fn start_http_server<M, S>(
     config: HttpConfig,
-    broker: Broker,
+    broker: Broker<M, S>,
     token: CancellationToken,
-) -> Result<(), Error> {
+) -> Result<(), Error>
+where
+    M: Meta,
+    S: Storage,
+{
     let _gurad = defer(|| token.cancel());
     let app = Router::new()
         .route("/comet/api/peer/v1/topic", get(|| async { "hello, world" }))

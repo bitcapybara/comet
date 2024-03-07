@@ -1,9 +1,9 @@
 #![allow(unused)]
 
-mod codec;
+pub mod codec;
 pub mod defer;
-mod io;
+pub mod io;
 pub mod mtls;
 pub mod protocol;
-mod types;
-mod utils;
+pub mod types;
+pub mod utils;

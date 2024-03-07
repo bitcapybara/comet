@@ -7,12 +7,13 @@ use crate::broker::{self, Broker};
 
 use self::{
     http::{start_http_server, HttpConfig},
+    meta::Meta,
     quic::{start_quic_server, QuicConfig},
 };
 
-mod http;
-mod meta;
-mod quic;
+pub mod http;
+pub mod meta;
+pub mod quic;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
@@ -33,8 +34,15 @@ pub struct ServerConfig {
     http: HttpConfig,
 }
 
-pub async fn start_server(config: ServerConfig, token: CancellationToken) -> Result<(), Error> {
-    let broker = Broker::new().context(BrokerSnafu)?;
+pub async fn start_server<M>(
+    config: ServerConfig,
+    meta: M,
+    token: CancellationToken,
+) -> Result<(), Error>
+where
+    M: Meta,
+{
+    let broker = Broker::<_, M::Storage>::new(meta).context(BrokerSnafu)?;
 
     let child_token = token.child_token();
     let mut join_set = JoinSet::new();
