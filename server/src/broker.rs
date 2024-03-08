@@ -17,8 +17,11 @@ use comet_common::{
     io as comet_io,
     protocol::{
         self,
-        consumer::{self, CloseConsumer, Subscribe},
+        acknowledge::Acknowledge,
+        consumer::{self, CloseConsumer, Subscribe, Unsubscribe},
+        control_flow::ControlFlow,
         producer::{CloseProducer, CreateProducer},
+        publish::Publish,
         response::ReturnCode,
         Packet,
     },
@@ -82,19 +85,6 @@ where
     }
 }
 
-macro_rules! send_error {
-    ($e: expr, $res_tx: expr) => {
-        match $e {
-            topic::Error::PacketResponse { code } => {
-                $res_tx.send(Packet::err(code.clone())).ok();
-            }
-            e => {
-                $res_tx.send(Packet::err(ReturnCode::Internal(e.to_string())));
-            }
-        }
-    };
-}
-
 impl<M, S> Broker<M, S>
 where
     M: Meta<Storage = S>,
@@ -121,13 +111,14 @@ where
         let Some(session) = state.sessions.get_mut(&client_id) else {
             return;
         };
-        let Some(ProducerInfo { topic_name, .. }) = session.del_producer(packet.producer_id) else {
+        let producer_id = packet.producer_id;
+        let Some(ProducerInfo { topic_name, .. }) = session.del_producer(producer_id) else {
             return;
         };
         let Some(topic) = state.topics.get(&topic_name) else {
             return;
         };
-        topic.del_producer(packet.producer_id).await;
+        topic.del_producer(producer_id).await;
     }
 
     pub async fn handle_close_consumer(&self, client_id: u64, packet: CloseConsumer) {
@@ -135,20 +126,19 @@ where
         let Some(session) = state.sessions.get_mut(&client_id) else {
             return;
         };
+        let consumer_id = packet.consumer_id;
         let Some(ConsumerInfo {
             topic_name,
             subscription_name,
             ..
-        }) = session.del_consumer(packet.consumer_id)
+        }) = session.del_consumer(consumer_id)
         else {
             return;
         };
         let Some(topic) = state.topics.get(&topic_name) else {
             return;
         };
-        topic
-            .del_consumer(&subscription_name, packet.consumer_id)
-            .await;
+        topic.del_consumer(&subscription_name, consumer_id).await;
     }
 
     pub async fn handle_disconnect(&self, client_id: u64) {
@@ -156,21 +146,21 @@ where
         let Some(mut session) = state.sessions.remove(&client_id) else {
             return;
         };
-        while let Some((
+        for (
             consumer_id,
             ConsumerInfo {
                 topic_name,
                 subscription_name,
                 ..
             },
-        )) = session.pop_consumer()
+        ) in session.drain_consumer()
         {
             let Some(topic) = state.topics.get(&topic_name) else {
                 continue;
             };
             topic.del_consumer(&subscription_name, consumer_id).await;
         }
-        while let Some((producer_id, ProducerInfo { topic_name, .. })) = session.pop_producer() {
+        for (producer_id, ProducerInfo { topic_name, .. }) in session.drain_producer() {
             let Some(topic) = state.topics.get(&topic_name) else {
                 continue;
             };
@@ -198,20 +188,32 @@ where
             return;
         }
 
-        let topic = match state.topics.get(&topic_name) {
-            Some(topic) => {
-                if let Err(e) = topic
-                    .add_producer(producer_id, producer)
-                    .await
-                    .inspect_err(|e| send_error!(e, res_tx))
-                {
-                    error!(topic_name, producer_name, "topic add producer error: {e}");
-                    return;
+        match state.topics.get(&topic_name) {
+            Some(topic) => match topic.add_producer(producer_id, producer).await {
+                Ok(_) => {
+                    if !topic.has_producer(producer_id).await {
+                        return;
+                    }
+                    if let Some(session) = state.sessions.get_mut(&client_id) {
+                        session.add_producer(producer_id, &producer_name, &topic_name);
+                    }
+                    res_tx.send(Packet::ok()).ok();
                 }
-                topic.clone()
-            }
+                Err(topic::Error::PacketResponse { code }) => {
+                    res_tx.send(Packet::err(code)).ok();
+                }
+                Err(e) => {
+                    error!(
+                        producer_name,
+                        topic_name, "handle create producer error: {e}"
+                    );
+                    res_tx
+                        .send(Packet::err(ReturnCode::Internal(e.to_string())))
+                        .ok();
+                }
+            },
             None => {
-                let storage = match self.meta.get_storage(&topic_name).await {
+                let storage = match self.meta.get_storage().await {
                     Ok(s) => s,
                     Err(e) => {
                         res_tx
@@ -221,24 +223,32 @@ where
                     }
                 };
                 let topic = Topic::new(&topic_name, storage, session.client_tx.clone());
-                if let Err(e) = topic
-                    .add_producer(producer_id, producer)
-                    .await
-                    .inspect_err(|e| send_error!(e, res_tx))
-                {
-                    error!(topic_name, producer_name, "topic add producer error: {e}");
-                    return;
+                match topic.add_producer(producer_id, producer).await {
+                    Ok(_) => {
+                        state.topics.insert(topic_name.to_string(), topic.clone());
+                        if !topic.has_producer(producer_id).await {
+                            return;
+                        }
+                        if let Some(session) = state.sessions.get_mut(&client_id) {
+                            session.add_producer(producer_id, &producer_name, &topic_name);
+                        }
+                        res_tx.send(Packet::ok()).ok();
+                    }
+                    Err(topic::Error::PacketResponse { code }) => {
+                        res_tx.send(Packet::err(code)).ok();
+                    }
+                    Err(e) => {
+                        error!(
+                            producer_name,
+                            topic_name, "handle create producer error: {e}"
+                        );
+                        res_tx
+                            .send(Packet::err(ReturnCode::Internal(e.to_string())))
+                            .ok();
+                    }
                 }
-                state.topics.insert(topic_name.to_string(), topic.clone());
-                topic
             }
         };
-        if !topic.has_producer(producer_id).await {
-            return;
-        }
-        if let Some(session) = state.sessions.get_mut(&client_id) {
-            session.add_producer(producer_id, &producer_name, &topic_name);
-        }
     }
 
     pub async fn handle_subscribe(
@@ -261,20 +271,37 @@ where
                 .ok();
             return;
         }
-        let topic = match state.topics.get(&topic_name) {
-            Some(topic) => {
-                if let Err(e) = topic
-                    .add_consumer(consumer_id, subscribe)
-                    .await
-                    .inspect_err(|e| send_error!(e, res_tx))
-                {
-                    error!("topic add consumer error: {e}");
-                    return;
+        match state.topics.get(&topic_name) {
+            Some(topic) => match topic.add_consumer(consumer_id, subscribe).await {
+                Ok(_) => {
+                    if !topic.has_consumer(consumer_id).await {
+                        return;
+                    }
+                    if let Some(session) = state.sessions.get_mut(&client_id) {
+                        session.add_consumer(
+                            consumer_id,
+                            &consumer_name,
+                            &topic_name,
+                            &subscription_name,
+                        );
+                    }
+                    res_tx.send(Packet::ok()).ok();
                 }
-                topic.clone()
-            }
+                Err(topic::Error::PacketResponse { code }) => {
+                    res_tx.send(Packet::err(code)).ok();
+                }
+                Err(e) => {
+                    error!(
+                        consumer_name,
+                        topic_name, subscription_name, "handle subscribe error: {e}"
+                    );
+                    res_tx
+                        .send(Packet::err(ReturnCode::Internal(e.to_string())))
+                        .ok();
+                }
+            },
             None => {
-                let storage = match self.meta.get_storage(&topic_name).await {
+                let storage = match self.meta.get_storage().await {
                     Ok(s) => s,
                     Err(e) => {
                         let packet = Packet::err(ReturnCode::Internal(e.to_string()));
@@ -283,24 +310,184 @@ where
                     }
                 };
                 let topic = Topic::new(&topic_name, storage, session.client_tx.clone());
-                if let Err(e) = topic
-                    .add_consumer(consumer_id, subscribe)
-                    .await
-                    .inspect_err(|e| send_error!(e, res_tx))
-                {
-                    error!("topic add consumer error: {e}");
-                    return;
+                match topic.add_consumer(consumer_id, subscribe).await {
+                    Ok(_) => {
+                        state.topics.insert(topic_name.to_string(), topic.clone());
+                        if !topic.has_consumer(consumer_id).await {
+                            return;
+                        }
+                        if let Some(session) = state.sessions.get_mut(&client_id) {
+                            session.add_consumer(
+                                consumer_id,
+                                &consumer_name,
+                                &topic_name,
+                                &subscription_name,
+                            );
+                        }
+                        res_tx.send(Packet::ok()).ok();
+                    }
+                    Err(topic::Error::PacketResponse { code }) => {
+                        res_tx.send(Packet::err(code)).ok();
+                    }
+                    Err(e) => {
+                        error!(
+                            consumer_name,
+                            subscription_name, "handle subscribe error: {e}"
+                        );
+                        res_tx
+                            .send(Packet::err(ReturnCode::Internal(e.to_string())))
+                            .ok();
+                    }
                 }
-                state.topics.insert(topic_name.to_string(), topic.clone());
-                topic
             }
         };
+    }
 
-        if !topic.has_consumer(consumer_id).await {
+    pub async fn handle_publish(
+        &self,
+        client_id: u64,
+        packet: Publish,
+        res_tx: oneshot::Sender<Packet>,
+    ) {
+        let state = self.state.read().await;
+        let Some(session) = state.sessions.get(&client_id) else {
+            unreachable!()
+        };
+        let Some(producer) = session.get_producer(packet.header.producer_id) else {
+            res_tx.send(Packet::err(ReturnCode::ProducerNotFound)).ok();
             return;
+        };
+        let topic = packet.header.topic_name.clone();
+        let Some(topic) = state.topics.get(&topic) else {
+            res_tx.send(Packet::err(ReturnCode::TopicNotFound)).ok();
+            return;
+        };
+        let producer_name = &producer.producer_name;
+        match topic.publish(packet).await {
+            Ok(_) => {
+                res_tx.send(Packet::ok()).ok();
+            }
+            Err(topic::Error::PacketResponse { code }) => {
+                res_tx.send(Packet::err(code)).ok();
+            }
+            Err(e) => {
+                error!(producer_name, "handle publish message error: {e}");
+                res_tx
+                    .send(Packet::err(ReturnCode::Internal(e.to_string())))
+                    .ok();
+            }
         }
-        if let Some(session) = state.sessions.get_mut(&client_id) {
-            session.add_consumer(consumer_id, &consumer_name, &topic_name, &subscription_name);
+    }
+
+    pub async fn handle_control_flow(
+        &self,
+        client_id: u64,
+        packet: ControlFlow,
+        res_tx: oneshot::Sender<Packet>,
+    ) {
+        let state = self.state.read().await;
+        let Some(session) = state.sessions.get(&client_id) else {
+            unreachable!()
+        };
+        let Some(consumer) = session.get_consumer(packet.consumer_id) else {
+            res_tx.send(Packet::err(ReturnCode::ConsumerNotFound)).ok();
+            return;
+        };
+        let Some(topic) = state.topics.get(&consumer.topic_name) else {
+            res_tx.send(Packet::err(ReturnCode::TopicNotFound)).ok();
+            return;
+        };
+        let consumer_name = &consumer.consumer_name;
+        match topic
+            .control_flow(&consumer.subscription_name, packet)
+            .await
+        {
+            Ok(_) => {
+                res_tx.send(Packet::ok()).ok();
+            }
+            Err(topic::Error::PacketResponse { code }) => {
+                res_tx.send(Packet::err(code)).ok();
+            }
+            Err(e) => {
+                error!(consumer_name, "handle controlflow error: {e}");
+                res_tx
+                    .send(Packet::err(ReturnCode::Internal(e.to_string())))
+                    .ok();
+            }
+        }
+    }
+
+    pub async fn handle_acknowledge(
+        &self,
+        client_id: u64,
+        packet: Acknowledge,
+        res_tx: oneshot::Sender<Packet>,
+    ) {
+        let state = self.state.read().await;
+        let Some(session) = state.sessions.get(&client_id) else {
+            unreachable!()
+        };
+        let Some(consumer) = session.get_consumer(packet.consumer_id) else {
+            res_tx.send(Packet::err(ReturnCode::ConsumerNotFound)).ok();
+            return;
+        };
+        let Some(topic) = state.topics.get(&consumer.topic_name) else {
+            res_tx.send(Packet::err(ReturnCode::TopicNotFound)).ok();
+            return;
+        };
+        let consumer_name = &consumer.consumer_name;
+        match topic.acknowledge(&consumer.subscription_name, packet).await {
+            Ok(_) => {
+                res_tx.send(Packet::ok()).ok();
+            }
+            Err(topic::Error::PacketResponse { code }) => {
+                res_tx.send(Packet::err(code)).ok();
+            }
+            Err(e) => {
+                error!(consumer_name, "handle ack error: {e}");
+                res_tx
+                    .send(Packet::err(ReturnCode::Internal(e.to_string())))
+                    .ok();
+            }
+        }
+    }
+
+    pub async fn handle_unsubscribe(
+        &self,
+        client_id: u64,
+        packet: Unsubscribe,
+        res_tx: oneshot::Sender<Packet>,
+    ) {
+        let mut state = self.state.write().await;
+        let Some(session) = state.sessions.get(&client_id) else {
+            unreachable!()
+        };
+        let consumer_id = packet.consumer_id;
+        let Some(consumer) = session.get_consumer(packet.consumer_id) else {
+            res_tx.send(Packet::err(ReturnCode::ConsumerNotFound)).ok();
+            return;
+        };
+        let Some(topic) = state.topics.get(&consumer.topic_name) else {
+            res_tx.send(Packet::err(ReturnCode::TopicNotFound)).ok();
+            return;
+        };
+        let consumer_name = &consumer.consumer_name;
+        match topic.unsubscribe(packet).await {
+            Ok(_) => {
+                if let Some(s) = state.sessions.get_mut(&client_id) {
+                    s.del_consumer(consumer_id);
+                }
+                res_tx.send(Packet::ok()).ok();
+            }
+            Err(topic::Error::PacketResponse { code }) => {
+                res_tx.send(Packet::err(code)).ok();
+            }
+            Err(e) => {
+                error!(consumer_name, "handle unsubscribe error: {e}");
+                res_tx
+                    .send(Packet::err(ReturnCode::Internal(e.to_string())))
+                    .ok();
+            }
         }
     }
 }
@@ -340,14 +527,18 @@ where
                             broker.handle_create_producer(client_id, packet, res_tx).await;
                         },
                         Packet::Publish(packet) => {
-                            todo!()
+                            broker.handle_publish(client_id, packet, res_tx).await;
                         },
                         Packet::Subscribe(packet) => {
                             broker.handle_subscribe(client_id, packet, res_tx).await;
                         },
-                        Packet::ControlFlow(_) => todo!(),
-                        Packet::Acknowledge(_) => todo!(),
-                        Packet::Unsubscribe(_) => todo!(),
+                        Packet::ControlFlow(packet) => {
+                            broker.handle_control_flow(client_id, packet, res_tx).await;
+                        },
+                        Packet::Acknowledge(packet) => {
+                            broker.handle_acknowledge(client_id, packet, res_tx).await;
+                        },
+                        Packet::Unsubscribe(packet) => todo!(),
                         _ => unreachable!()
                     }
                 }

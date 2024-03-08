@@ -8,4 +8,7 @@ pub enum ReturnCode {
     Internal(String),
     ProducerNameAlreadyExists,
     ConsumerNameAlreadyExists,
+    ProducerNotFound,
+    ConsumerNotFound,
+    TopicNotFound,
 }
