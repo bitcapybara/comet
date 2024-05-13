@@ -1,0 +1,6 @@
+.vscode/
+certs/
+target/
+Cargo.lock
+.DS_Store
+server/data/

@@ -1,0 +1,48 @@
+version: "3"
+
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - 5432:5432
+    environment:
+      # - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=devpass
+      - POSTGRES_DB=cometmq
+
+  pgbouncer:
+    image: bitnami/pgbouncer:1.22.1
+    ports:
+      - 6432:6432
+    environment:
+      - POSTGRESQL_HOST=postgres
+      - POSTGRESQL_USERNAME=postgres
+      - POSTGRESQL_PASSWORD=devpass
+      - POSTGRESQL_DATABASE=cometmq
+      - PGBOUNCER_DATABASE=cometmq
+      - PGBOUNCER_PORT=6432
+      - PGBOUNCER_AUTH_TYPE=trust
+    depends_on:
+      - postgres
+
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.5.12
+    ports:
+      - 2379:2379
+      - 2380:2380
+    environment:
+      - ETCD_NAME=node1
+      - ETCD_INITIAL_ADVERTISE_PEER_URLS=http://192.168.16.200:2380
+      - ETCD_LISTEN_PEER_URLS=http://0.0.0.0:2380
+      - ETCD_ADVERTISE_CLIENT_URLS=http://192.168.16.200:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_INITIAL_CLUSTER=node1=http://192.168.16.200:2380
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    ports:
+      - 16686:16686
+      - 4317:4317
+      - 4318:4318
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true

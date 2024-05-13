@@ -1,0 +1,21 @@
+name: project-check
+
+on: push
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: arduino/setup-protoc@v3
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - name: Run fmt
+      run: make fmt
+    - name: Run clippy
+      run: make clippy
+    - name: Run tests
+      run: make test

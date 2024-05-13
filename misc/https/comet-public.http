@@ -1,0 +1,19 @@
+@hostname = localhost
+@port = 6888
+@host = {{hostname}}:{{port}}
+
+### create topic
+@topic_name = test-topic
+
+POST http://{{host}}/comet/api/public/topic/{{topic_name}} HTTP/1.1
+content-type: application/json
+
+{
+    partitions: 1,
+    acked_retention: {
+        num_limit: null,
+        time_limit: null
+    }
+}
+
+### 
