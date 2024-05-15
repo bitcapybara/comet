@@ -1,4 +1,4 @@
-pub mod distribute_id;
+pub mod distribute;
 pub mod local;
 
 pub trait IdGenerator: Clone + Send + Sync + 'static {

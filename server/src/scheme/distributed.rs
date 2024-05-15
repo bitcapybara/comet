@@ -1,5 +1,5 @@
 use chrono::{TimeZone, Utc};
-use comet_common::id::distribute_id::DistributeId;
+use comet_common::id::distribute::DistributeId;
 
 use crate::{
     meta::{
