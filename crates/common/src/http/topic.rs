@@ -28,7 +28,7 @@ impl Default for Config {
 /// | >0         | >0         | Acknowledged messages or messages with no active subscription will not be retained when either time or size reaches the limit. |
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AckedRetentionPolicyConfig {
-    /// 消息保存的总字节数
+    /// 消息保存的条数
     pub num_limit: Option<usize>,
     /// 消息保存的最大时长
     pub time_limit: Option<Duration>,
