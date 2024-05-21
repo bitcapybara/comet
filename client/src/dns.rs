@@ -32,7 +32,7 @@ impl DnsResolver for LocalDnsResolver {
 
     #[tracing::instrument(skip(self))]
     async fn resolve(&self, host: &str, port: u16) -> Result<SocketAddr, Self::Error> {
-        lookup_host(host.to_string())
+        lookup_host((host, port))
             .await
             .context(IoSnafu { host })?
             .find(|addr| !addr.ip().is_multicast() && !addr.ip().is_unspecified() && addr.is_ipv4())
