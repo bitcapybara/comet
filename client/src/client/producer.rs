@@ -377,7 +377,7 @@ pub async fn start_producer<D, C>(
                     }
                     Err(crate::Error::Disconnect { .. }) => return,
                     Err(e) => {
-                        error!(domain = %addr.addr(), "get connection error: {e:?}");
+                        error!(domain = %addr.domain, "get connection error: {e:?}");
                     }
                 }
             }

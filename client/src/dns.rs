@@ -3,7 +3,6 @@ use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 
-use comet_common::addr::Addr;
 use snafu::{OptionExt, ResultExt, Snafu};
 use tokio::net::lookup_host;
 
@@ -12,7 +11,8 @@ pub trait DnsResolver: Clone + Send + Sync + 'static {
 
     fn resolve(
         &self,
-        host: impl Into<Addr> + Debug + Send,
+        host: &str,
+        port: u16,
     ) -> impl Future<Output = Result<SocketAddr, Self::Error>> + Send;
 }
 
@@ -31,11 +31,7 @@ impl DnsResolver for LocalDnsResolver {
     type Error = LocalDnsError;
 
     #[tracing::instrument(skip(self))]
-    async fn resolve(
-        &self,
-        host: impl Into<Addr> + Debug + Send,
-    ) -> Result<SocketAddr, Self::Error> {
-        let host = &host.into();
+    async fn resolve(&self, host: &str, port: u16) -> Result<SocketAddr, Self::Error> {
         lookup_host(host.to_string())
             .await
             .context(IoSnafu { host })?

@@ -53,38 +53,11 @@ impl Display for Scheme {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Addr(pub String, pub u16);
-
-impl std::fmt::Display for Addr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.0, self.1)
-    }
-}
-
-impl From<&Addr> for String {
-    fn from(addr: &Addr) -> Self {
-        addr.to_string()
-    }
-}
-
-impl From<&Addr> for Addr {
-    fn from(value: &Addr) -> Self {
-        Addr(value.0.clone(), value.1)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ConnectAddress {
-    scheme: Scheme,
-    domain: String,
-    port: u16,
-}
-
-impl ConnectAddress {
-    pub fn addr(&self) -> Addr {
-        Addr(self.domain.clone(), self.port)
-    }
+    pub scheme: Scheme,
+    pub domain: String,
+    pub port: u16,
 }
 
 impl FromStr for ConnectAddress {

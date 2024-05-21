@@ -175,14 +175,13 @@ where
             .start()
             .context(StartQuicClientSnafu)?;
 
-        let dns_addr = addr.addr();
         let socket_addr = self
             .dns_resolver
-            .resolve(&dns_addr)
+            .resolve(&addr.domain, addr.port)
             .await
             .map_err(|e| DnsResolverSnafu.into_error(Box::new(e)))?;
 
-        let connect = s2n_client::Connect::new(socket_addr).with_server_name(dns_addr.0);
+        let connect = s2n_client::Connect::new(socket_addr).with_server_name(addr.domain.clone());
         let connection = client.connect(connect).await.context(ClientConnectSnafu)?;
         // connection.keep_alive(true);
 
