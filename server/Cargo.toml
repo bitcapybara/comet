@@ -14,7 +14,7 @@ tokio-util = { workspace = true, features = ["time"] }
 s2n-quic.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["fs"] }
-etcd-client = { version = "0.12.4", optional = true }
+etcd-client = { version = "0.13.0", optional = true }
 futures.workspace = true
 axum = { workspace = true }
 reqwest.workspace = true
