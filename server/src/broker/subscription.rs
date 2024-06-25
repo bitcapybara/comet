@@ -80,8 +80,6 @@ pub struct Subscription<M, S>
 where
     M: MetaStorage,
 {
-    pub config: topic::Config,
-    pub info: SubscriptionInfo,
     storage: S,
     notifier: watch::Sender<()>,
     handle: JoinSet<()>,
@@ -139,9 +137,7 @@ where
             storage,
             notifier,
             handle,
-            info,
             token,
-            config,
             consumer_tx,
         })
     }

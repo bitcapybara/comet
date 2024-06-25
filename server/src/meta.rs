@@ -32,7 +32,6 @@ pub struct ConsumerInfo {
     /// consume init position
     pub initial_position: InitialPosition,
     /// default permits
-    pub default_permits: u32,
     pub priority: u8,
 }
 
@@ -46,7 +45,6 @@ impl ConsumerInfo {
             subscription_name: subscribe.subscription_name,
             subscription_type: subscribe.subscription_type,
             initial_position: subscribe.initial_position,
-            default_permits: subscribe.default_permits,
             priority: subscribe.priority,
         }
     }

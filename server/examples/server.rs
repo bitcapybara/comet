@@ -8,7 +8,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tracing::Level;
 use tracing_subscriber::{filter, layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
-use comet_common::{codec, mtls::CertsFile};
+use comet_common::mtls::CertsFile;
 
 #[tokio::main]
 async fn main() {
@@ -53,7 +53,7 @@ async fn main() {
     not(any(feature = "local-persist", feature = "distributed"))
 ))]
 async fn run_server() {
-    comet_server::start_local_memory_server::<_, codec::bincode::Bincode>(
+    comet_server::start_local_memory_server::<_, comet_common::codec::bincode::Bincode>(
         get_config(),
         signal_shutdown([
             SignalKind::hangup(),
@@ -75,7 +75,7 @@ fn get_config() -> comet_server::Config {
 
 #[cfg(feature = "local-persist")]
 async fn run_server() {
-    comet_server::start_local_persist_server::<_, codec::bincode::Bincode>(
+    comet_server::start_local_persist_server::<_, comet_common::codec::bincode::Bincode>(
         get_config(),
         signal_shutdown([
             SignalKind::hangup(),
@@ -100,7 +100,7 @@ fn get_config() -> comet_server::Config {
 
 #[cfg(feature = "distributed")]
 async fn run_server() {
-    comet_server::start_distributed_server::<_, codec::bincode::Bincode>(
+    comet_server::start_distributed_server::<_, comet_common::codec::bincode::Bincode>(
         get_config(),
         signal_shutdown([
             SignalKind::hangup(),
